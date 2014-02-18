@@ -1,0 +1,58 @@
+HW2 Yu Yin for BIOSTAT578
+========================================================
+Firstly, we try to get the data from the big dataset:
+
+```{r eval=FALSE}
+dbGetQuery(geo_con,"SELECT gse.title,gse.gse,gpl.ID,gpl.manufacturer,gpl.description
+            FROM (gse JOIN gse_gpl ON gse.gse=gse_gpl.gse) j 
+           JOIN gpl ON j.gpl=gpl.gpl 
+           WHERE  gse.summary LIKE '%HCV%' AND gpl.manufacturer LIKE 'Illumina%' AND 
+           gse.contact LIKE '%Yale%';")
+#gse.gse=GSE40812
+mygds <- getGEO("GSE40812")
+```
+
+Then after take a look at the data, we can sanitize it:
+
+```{r eval=FALSE}
+head(pData(mygds[[1]]))
+mygds_new <- mygds
+sanitize_pdata <- function(pd){
+  keepCols <- c(
+    "characteristics_ch1", "characteristics_ch1.2")
+  pd <- pd[, keepCols]
+  colnames(pd) <- c("ptkinds", "treatment")
+  pd$ptkinds <- gsub(".*: ", "", pd$ptkinds)
+  pd$treatment<-gsub("treatment: ", "", pd$treatment)
+  pd
+}
+pData(mygds_new[[1]]) <- sanitize_pdata(pData(mygds_new[[1]]))
+```
+
+We can make the model matrix based on the sanitized one:
+
+```{r eval=FALSE}
+mm <- model.matrix(~ptkinds+treatment, mygds_new[[1]])
+mm[,3] <- mm[,3]+mm[,4]
+```
+and make a linear model:
+```{r eval=FALSE}
+mmfit<- lmFit(mygds_new[[1]], mm[,1:3])
+ebay_mm <- eBayes(mmfit)
+toppoly <- topTable(ebay_mm, coef="treatmentPoly IC H", number=Inf, sort.by="none")
+```
+
+After that, we can try to find out the P value that is smaller than 0.1:
+
+```{r eval=FALSE}
+selected  <- p.adjust(ebay_mm$p.value[, 3]) <0.1
+gdsSel<-mygds_new[[1]][selected,]
+```
+
+Therefore we can mek the heatmap of thses selected data:
+
+```{r eval=FALSE}
+library(pheatmap)
+pData(plot)
+heatmap(exprs(gdsSel))
+```
