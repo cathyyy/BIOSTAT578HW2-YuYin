@@ -1,0 +1,140 @@
+HW3 Yu Yin BIOSTAT578
+========================================================
+Download the mapping information and processed data and Sanitize data and metadata
+
+```{r eval=FALSE}
+gds <- getGEO("GSE29619") 
+gds_new <- gds
+sanitize_pdata <- function(pd){
+  keepCols <- c(
+    "characteristics_ch1.1", "characteristics_ch1.2",
+    "description", 
+    "supplementary_file")
+  pd <- pd[, keepCols]
+  colnames(pd) <- c("ptid", "time", "description", "filename")
+  pd$ptid <- gsub(".*: ", "", pd$ptid)
+  pd$time <- gsub(".*: ", "", pd$time)
+  pd$time<-gsub("Day", "D", pd$time)
+  pd$description<-gsub("(-\\w*){2}$", "", pd$description)
+  pd$filename<-basename(as.character(pd$filename))
+  pd$filename<-gsub(".CEL.gz", "", pd$filename)
+  pd
+}
+
+pData(gds_new[[1]]) <- sanitize_pdata(pData(gds_new[[1]]))
+pData(gds_new[[2]]) <- sanitize_pdata(pData(gds_new[[2]]))
+pData(gds_new[[3]]) <- sanitize_pdata(pData(gds_new[[3]]))
+
+TIV_08 <- gds_new[[1]][ , grepl("2008-TIV", pData(gds_new[[1]])$description)]
+LAIV_08 <- gds_new[[1]][ , grepl("2008-LAIV", pData(gds_new[[1]])$description)]
+TIV_07 <- gds_new[[3]][ , grepl("2007-TIV", pData(gds_new[[3]])$description)]
+
+```
+
+install GEO meta database
+
+```{r eval=FALSE}
+source("http://bioconductor.org/biocLite.R")
+biocLite("GEOmetadb")
+library(GEOmetadb)
+library(GEOquery)
+biocLite("limma")
+library(limma)
+```
+
+find the design matrix:
+```{r eval=FALSE}
+new_set <- ExpressionSet(assayData = exprs(gds_new[[1]])+1)
+TIV_08 <- new_set
+pData(TIV_08) <- pData(gds_new[[1]])
+mm_TIV_08 <- model.matrix(~ptid+time, TIV_08) 
+```
+
+fit the linear model:
+
+```{r eval=FALSE}
+new_set_voom <- voom(TIV_08,design = mm_TIV_08)
+lm <- lmFit(new_set_voom, mm_TIV_08)
+eb <- eBayes(lm)
+```
+
+choose significant subset:
+
+```{r eval=FALSE}
+library(data.table)
+topT3 <- data.table(topTable(eb, coef = "timeD3", adjust = 'fdr',p.value= 0.01))
+topT7 <- data.table(topTable(eb, coef = "timeD7", adjust = 'fdr',p.value=0.01))
+```
+
+make the heat plot:
+
+```{r eval=FALSE}
+library(pheatmap)
+PValue <- matrix(c(topT3$logFC[topT3$adj.P.Val<0.1],topT7$logFC[topT7$adj.P.Val<0.1]),ncol=2)
+rownames(PValue) <- rownames(topT3)[topT3$adj.P.Val<0.1]
+colnames(PValue) <- c("timeD3","timeD7")
+pheatmap(PValue)
+```
+
+part c: get the files first:
+
+```{r eval=FALSE}
+files <- list.files(path = "Data/GEO/", pattern = "GSE29619_T.*.gz", full.names = TRUE)
+file_list <- lapply(files, read.table, header=TRUE)
+```
+
+We load the `GSEAbase` package for loading gene sets and convert the gene sets to gene indices
+
+```{r eval=FALSE}
+library(BiocInstaller)
+biocLite("GSEABase")
+library(GSEABase)
+c2_set <- getGmt("GSEA-sets/c2.all.v4.0.symbols.gmt")
+gene_ids <- geneIds(c2_set)
+```
+
+Camera requires gene-indices
+```{r eval=FALSE}
+sets_indices <- symbols2indices(gene_ids, fData(gds_new[[1]])[,"Gene Symbol"])
+```
+
+compare by timegroups
+
+```{r eval=FALSE}
+res <- vector("list",length = 2)
+ct <- 1
+for(i in c(3,7))
+{
+  contrast <- paste0("timeD",i)
+  cont_matrix <- makeContrasts(contrast, levels=mm_TIV_08)
+  res[[ct]] <- camera(new_set_voom, sets_indices, design=mm_TIV_08, contrast=cont_matrix, sort=FALSE)
+  ct <- ct+1
+}
+PValue <- sapply(res, function(x){ifelse(x$Direction=="Up", -10*log10(x$PValue), 10*log10(x$PValue))})
+rownames(PValue) <- rownames(res[[1]])
+PValue_max <- rowMax(abs(PValue))
+PValue_small <- PValue[PValue_max>30, ]
+anno <- data.frame(Time=paste0("timeD",c(3,7)))
+rownames(anno) <- colnames(PValue_small)  <- paste0("timeD",c(3,7))
+```
+
+make the heat plot:
+
+```{r eval=FALSE}
+pheatmap(PValue_small, cluster_cols=FALSE,show_rownames=FALSE)
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
